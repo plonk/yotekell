@@ -5,6 +5,7 @@ import Text.JSON.Generic
 import qualified Data.Set as Set
 import Data.List
 import Data.Maybe
+import System.Random
 
 import Pos
 import Bomb
@@ -63,7 +64,8 @@ data GameState = GameState { turn    :: Int,
                              players :: [Player],
                              bombs   :: [Bomb],
                              items   :: [Item],
-                             fires   :: Set.Set (Int, Int) }
+                             fires   :: Set.Set (Int, Int)
+                           }
                deriving (Eq, Data, Typeable)
 
 map2d f matrix = map (\(row, i) ->
@@ -99,6 +101,7 @@ instance Show GameState where
 	   " Walls " ++ show (Set.size (walls s)) ++ "\n" ++
            showMap s
 
+-- | ゲーム状態を遷移させる。
 transition :: GameState -> [Move] -> GameState
 transition s moves =
   applyThese s [playersPutBombs moves,
@@ -112,10 +115,15 @@ transition s moves =
                 blocksGetIncinerated,
                 deadPlayersGetMarked]
 
+-- | 複数の関数を数珠繋ぎに初期値に適用する。
+-- >>> applyThese 0 [(+1), (+2), (+3)]
+-- 6
+applyThese :: a -> [a -> a] -> a
 applyThese = foldl (flip ($))
 
 -- xs の n 番目の要素を x と入れ替える。
 -- n は 0 以上 length xs 未満にしてください。
+replaceNth :: Int -> a -> [a] -> [a]
 replaceNth n x xs = take n xs ++ [x] ++ drop (n+1) xs
 
 playersPutBombs :: [Move] -> GameState -> GameState
@@ -142,7 +150,7 @@ playersPutBombs moves s = applyThese s $
 -- | pos に爆弾がある。
 -- >>> isBomb sampleState $ Pos 1 1
 -- False
--- >>> let state' = playersPutBombs (take 4 $ repeat $ Move Stay True "") sampleState
+-- >>> let state' = playersPutBombs (take 4 $ repeat $ Move Stay True) sampleState
 -- >>> isBomb state' $ Pos 1 1
 -- True
 isBomb :: GameState -> Pos -> Bool
@@ -186,7 +194,7 @@ isWall s pos = Set.member (toVec pos) (walls s)
 -- True
 -- >>> isEnterable sampleState $ Pos 2 2
 -- False
--- >>> let state' = playersPutBombs (take 4 $ repeat $ Move Stay True "") sampleState
+-- >>> let state' = playersPutBombs (take 4 $ repeat $ Move Stay True) sampleState
 -- >>> isEnterable state' $ Pos 1 1
 -- False
 isEnterable s pos = not (isWall s pos || isBlock s pos || isBomb s pos)
@@ -225,7 +233,7 @@ wallFalls s = if (turn s) >= 360 && (turn s) - 360 < length fallingWalls
 bombTimersDecrement :: GameState -> GameState
 bombTimersDecrement s = s { bombs = bombs' }
   where
-    bombs' = map (\b -> b { timer = (timer b) - 1 }) (bombs s)
+    bombs' = map Bomb.decrementCount (bombs s)
 
 itemEffect :: Item -> Player -> GameState -> GameState
 itemEffect item player s = case Item.name item of
