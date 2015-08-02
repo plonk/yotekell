@@ -15,3 +15,6 @@ data Bomb = Bomb { pos :: Pos,
 decrementCount :: Bomb -> Bomb
 decrementCount Bomb { timer = 0 } = error "cannot decrement timer"
 decrementCount bomb = bomb { timer = (timer bomb) - 1 }
+
+posVec :: Bomb -> (Int, Int)
+posVec b = Pos.toVec (pos b)

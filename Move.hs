@@ -31,6 +31,7 @@ instance Random Move where
            in (Move command bomb, gen'')
 
 -- | ボムマンサーバーへの送信に適した形に文字列化する。
+-- >>> import Move
 -- >>> show $ Move Up True
 -- "UP,true"
 instance Show Move where

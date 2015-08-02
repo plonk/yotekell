@@ -2,7 +2,7 @@
 module GameState where
 
 import Text.JSON.Generic
-import qualified Data.Set as Set
+import qualified Data.Set as S
 import Data.List
 import Data.Maybe
 import System.Random
@@ -59,12 +59,12 @@ spiral left right top bottom =
 fallingWalls = spiral 1 13 1 13
 
 data GameState = GameState { turn    :: Int,
-                             walls   :: Set.Set (Int, Int),
-                             blocks  :: Set.Set (Int, Int),
+                             walls   :: S.Set (Int, Int),
+                             blocks  :: S.Set (Int, Int),
                              players :: [Player],
                              bombs   :: [Bomb],
                              items   :: [Item],
-                             fires   :: Set.Set (Int, Int)
+                             fires   :: S.Set (Int, Int)
                            }
                deriving (Eq, Data, Typeable)
 
@@ -74,7 +74,7 @@ map2d f matrix = map (\(row, i) ->
                  zip matrix [0..]
 
 overlaySymbols symbol set =
-  map2d (\(c, (i, j))  -> if Set.member (j, i) set then symbol else c)
+  map2d (\(c, (i, j))  -> if S.member (j, i) set then symbol else c)
 
 overlayObjects pos symf os =
   map2d (\(c, (i, j)) ->
@@ -82,39 +82,42 @@ overlayObjects pos symf os =
             Just obj -> symf obj
             Nothing  -> c)
 
-showMap s = unlines $
+showMap state = unlines $
                 foldl (\acc f -> f acc) matrix $
                 [overlayBlocks, overlayBombs, overlayItems,
                  overlayFires, overlayWalls, overlayPlayers]
   where
-    overlayPlayers = overlayObjects Player.pos (head . Player.ch) (players s)
-    overlayItems   = overlayObjects Item.pos (head . Item.name) (items s)
-    overlayBombs   = overlayObjects Bomb.pos (\b -> '●') (bombs s)
-    overlayFires   = overlaySymbols '火' (fires s)
-    overlayBlocks  = overlaySymbols '□' (blocks s)
-    overlayWalls   = overlaySymbols '■' (walls s)
+    overlayPlayers = overlayObjects Player.pos (head . Player.ch) (players state)
+    overlayItems   = overlayObjects Item.pos (head . Item.name) (items state)
+    overlayBombs   = overlayObjects Bomb.pos (\b -> '●') (bombs state)
+    overlayFires   = overlaySymbols '火' (fires state)
+    overlayBlocks  = overlaySymbols '□' (blocks state)
+    overlayWalls   = overlaySymbols '■' (walls state)
     matrix         = take 15 $ repeat $ take 15 $ repeat '　'
 
 instance Show GameState where
-  show s = "Turn " ++ show (turn s) ++
-           " Bombs " ++ show (length (bombs s)) ++
-	   " Walls " ++ show (Set.size (walls s)) ++ "\n" ++
-           showMap s
+  show state = "Turn " ++ show (turn state) ++
+           " Bombs " ++ show (length (bombs state)) ++
+	   " Walls " ++ show (S.size (walls state)) ++ "\n" ++
+           showMap state
+
+bundleRandom :: RandomGen g => (GameState -> GameState) -> ((GameState, g) -> (GameState, g))
+bundleRandom f = \(state, gen) -> (f state, gen)
 
 -- | ゲーム状態を遷移させる。
-transition :: GameState -> [Move] -> GameState
-transition s moves =
-  applyThese s [playersPutBombs moves,
-                playersMove moves,
-                turnIncrements,
-                wallFalls,
-                bombTimersDecrement,
-                itemsGetPicked,
-                bombsExplode,
-                itemsGetIncinerated,
-                blocksGetIncinerated,
-                deadPlayersGetMarked]
-
+transition :: RandomGen g => GameState -> [Move] -> g -> (GameState, g)
+transition state moves gen = applyThese (state, gen) $
+                             map bundleRandom [playersPutBombs moves,
+                                               playersMove moves,
+                                               turnIncrements,
+                                               wallFalls,
+                                               bombTimersDecrement,
+                                               itemsGetPicked,
+                                               bombsExplode,
+                                               itemsGetIncinerated,
+                                               blocksGetIncinerated,
+                                               deadPlayersGetMarked]
+    
 -- | 複数の関数を数珠繋ぎに初期値に適用する。
 -- >>> applyThese 0 [(+1), (+2), (+3)]
 -- 6
@@ -127,24 +130,24 @@ replaceNth :: Int -> a -> [a] -> [a]
 replaceNth n x xs = take n xs ++ [x] ++ drop (n+1) xs
 
 playersPutBombs :: [Move] -> GameState -> GameState
-playersPutBombs moves s = applyThese s $
-                              map (\id -> putBomb ((players s)!!id) (moves!!id)) [0..numPlayers-1]
+playersPutBombs moves state = applyThese state $
+                              map (\id -> putBomb ((players state)!!id) (moves!!id)) [0..numPlayers-1]
   where
-    numPlayers = length (players s)
-    putBomb player move s =
+    numPlayers = length (players state)
+    putBomb player move state =
       if Move.bomb move && playerCanSetBomb player
-      then s { players = players', bombs = bombs' }
+      then state { players = players', bombs = bombs' }
       else
-        s
+        state
       where
-        players' = replaceNth (Player.id player) player' (players s)
+        players' = replaceNth (Player.id player) player' (players state)
         bombs' = Bomb { Bomb.pos   = Player.pos player,
                         Bomb.timer = 10,
-                        Bomb.power = Player.power player } : bombs s
+                        Bomb.power = Player.power player } : bombs state
         player' = player { setBombCount      = (setBombCount player) + 1,
                            totalSetBombCount = (totalSetBombCount player) + 1 }
         playerCanSetBomb player = isAlive player &&
-                                  (not $ isBomb s (Player.pos player)) &&
+                                  (not $ isBomb state (Player.pos player)) &&
                                   setBombLimit player > setBombCount player
 
 -- | pos に爆弾がある。
@@ -154,7 +157,7 @@ playersPutBombs moves s = applyThese s $
 -- >>> isBomb state' $ Pos 1 1
 -- True
 isBomb :: GameState -> Pos -> Bool
-isBomb s pos = find (\b -> Bomb.pos b == pos) (bombs s) /= Nothing
+isBomb state pos = find (\b -> Bomb.pos b == pos) (bombs state) /= Nothing
 
 dirOffsets :: Move.Command -> (Int, Int)
 dirOffsets dir = case dir of
@@ -165,13 +168,13 @@ dirOffsets dir = case dir of
   Move.Stay -> (0, 0)
 
 playersMove :: [Move] -> GameState -> GameState
-playersMove moves s = applyThese s $
-                          map (\id -> playerMoves ((players s)!!id) (moves!!id)) [0..numPlayers-1]
+playersMove moves state = applyThese state $
+                          map (\id -> playerMoves ((players state)!!id) (moves!!id)) [0..numPlayers-1]
   where
-    numPlayers = length (players s)
-    playerMoves player move s = if isAlive player && isEnterable s nextPos
-                                    then s { players = replaceNth (Player.id player) player { Player.pos = nextPos } (players s) }
-                                    else s
+    numPlayers = length (players state)
+    playerMoves player move state = if isAlive player && isEnterable state nextPos
+                                    then state { players = replaceNth (Player.id player) player { Player.pos = nextPos } (players state) }
+                                    else state
       where
         nextPos = Pos.addVec (Player.pos player) $ dirOffsets (Move.command move)
 
@@ -180,14 +183,14 @@ playersMove moves s = applyThese s $
 -- False
 -- >>> isBlock sampleState $ Pos 3 1
 -- True
-isBlock s pos = Set.member (toVec pos) (blocks s)
+isBlock state pos = S.member (toVec pos) (blocks state)
 
 -- | pos に壁がある。
 -- >>> isWall sampleState $ Pos 0 0
 -- True
 -- >>> isWall sampleState $ Pos 1 1
 -- False
-isWall s pos = Set.member (toVec pos) (walls s)
+isWall state pos = S.member (toVec pos) (walls state)
 
 -- | プレーヤーは隣接するマスから pos に移動できる。
 -- >>> isEnterable sampleState $ Pos 1 1
@@ -197,7 +200,7 @@ isWall s pos = Set.member (toVec pos) (walls s)
 -- >>> let state' = playersPutBombs (take 4 $ repeat $ Move Stay True) sampleState
 -- >>> isEnterable state' $ Pos 1 1
 -- False
-isEnterable s pos = not (isWall s pos || isBlock s pos || isBomb s pos)
+isEnterable state pos = not (isWall state pos || isBlock state pos || isBomb state pos)
 
 -- | ターンカウントを増加させる。
 -- >>> turn sampleState
@@ -206,7 +209,7 @@ isEnterable s pos = not (isWall s pos || isBlock s pos || isBomb s pos)
 -- >>> turn state'
 -- 1
 turnIncrements :: GameState -> GameState
-turnIncrements s = s { turn = (turn s) + 1 }
+turnIncrements state = state { turn = (turn state) + 1 }
 
 -- | ターン 360 から壁が１つずつ降ってくる
 -- 初期の壁の数をマップの大きさから求めると、
@@ -216,74 +219,77 @@ turnIncrements s = s { turn = (turn s) + 1 }
 -- となるので、n = 15 の場合 92 になる。
 -- 
 -- >>> let state' = sampleState { turn = 360 }
--- >>> Set.size (walls state')
+-- >>> S.size (walls state')
 -- 92
--- >>> Set.size (walls $ wallFalls state')
+-- >>> S.size (walls $ wallFalls state')
 -- 93
 wallFalls :: GameState -> GameState
-wallFalls s = if (turn s) >= 360 && (turn s) - 360 < length fallingWalls
-              then let pt = fallingWalls !! (turn s - 360)
-                   in s { walls = Set.union (walls s) (Set.singleton pt),
-                          blocks = Set.difference (blocks s) (Set.singleton pt),
-                          items = filter (\item -> (Pos.toVec $ Item.pos item) /= pt) (items s),
-                          bombs = filter (\bomb -> (Pos.toVec $ Bomb.pos bomb) /= pt) (bombs s) }
+wallFalls state = if (turn state) >= 360 && (turn state) - 360 < length fallingWalls
+              then let pt = fallingWalls !! (turn state - 360)
+                   in state { walls = S.union (walls state) (S.singleton pt),
+                          blocks = S.difference (blocks state) (S.singleton pt),
+                          items = filter (\item -> (Pos.toVec $ Item.pos item) /= pt) (items state),
+                          bombs = filter (\bomb -> (Pos.toVec $ Bomb.pos bomb) /= pt) (bombs state) }
               else
-                s
+                state
 
 bombTimersDecrement :: GameState -> GameState
-bombTimersDecrement s = s { bombs = bombs' }
+bombTimersDecrement state = state { bombs = bombs' }
   where
-    bombs' = map Bomb.decrementCount (bombs s)
+    bombs' = map Bomb.decrementCount (bombs state)
 
 itemEffect :: Item -> Player -> GameState -> GameState
-itemEffect item player s = case Item.name item of
-  "力" -> s { players = replaceNth (Player.id player) player { Player.power = (Player.power player) + 1 } (players s) }
-  "弾" -> s { players = replaceNth (Player.id player) player { setBombLimit = (setBombLimit player) + 1 } (players s) }
+itemEffect item player state = case Item.name item of
+  "力" -> state { players = replaceNth (Player.id player) player { Player.power = (Player.power player) + 1 } (players state) }
+  "弾" -> state { players = replaceNth (Player.id player) player { setBombLimit = (setBombLimit player) + 1 } (players state) }
   _ -> error "item effect unimplemented"
 
 itemsGetPicked :: GameState -> GameState
-itemsGetPicked s = applyThese s $ map (\id -> let player = (players s) !! id
-                                              in case find (\i -> (Item.pos i) == (Player.pos player)) (items s) of
+itemsGetPicked state = applyThese state $ map (\id -> let player = (players state) !! id
+                                              in case find (\i -> (Item.pos i) == (Player.pos player)) (items state) of
                                                 Nothing -> Prelude.id
-                                                Just item -> itemEffect item player) [0..length (players s) - 1]
+                                                Just item -> itemEffect item player) [0..length (players state) - 1]
 
 bombsExplode :: GameState -> GameState
-bombsExplode s = let (bombsUnexploded, fires') = iter [b | b <- (bombs s), (timer b) <= 0] ((bombs s), Set.empty)
-                 in s { bombs = bombsUnexploded, fires = fires' }
+bombsExplode state = let (bombs', fires') = chainReaction initIgnited (initUnignited, S.empty)
+                     in state { bombs = bombs', fires = fires' }
   where
-    iter bombsToExplode (bombsUnexploded, fires) = case bombsToExplode of
-      [] -> (bombsUnexploded, fires)
-      _ -> let fires' = Set.union fires $ Set.fromList $ concatMap (explode s) bombsToExplode
-               bombsToExplode' = [b | b <- bombsUnexploded, Set.member (Pos.toVec (Bomb.pos b)) fires']
-               bombsUnexploded' = [b | b <- bombsUnexploded, not $ Set.member (Pos.toVec (Bomb.pos b)) fires']
-           in iter bombsToExplode' (bombsUnexploded', fires')
+    initIgnited   = [b | b <- (bombs state), (timer b) <= 0]
+    initUnignited = [b | b <- (bombs state), (timer b) > 0]
+    -- 連鎖爆発
+    chainReaction ignited (unignited, fires) = case ignited of
+      [] -> (unignited, fires)
+      _  -> let fires'     = fires `S.union` (S.fromList $ concatMap (explode state) ignited)
+                ignited'   = [b | b <- unignited, S.member (Bomb.posVec b) fires']
+                unignited' = [b | b <- unignited, not$S.member (Bomb.posVec b) fires']
+            in chainReaction ignited' (unignited', fires')
 
 explode :: GameState -> Bomb -> [(Int, Int)]
-explode s b = Pos.toVec(Bomb.pos b) :
+explode state b = Pos.toVec(Bomb.pos b) :
             concatMap (\dir -> fireColumn (Bomb.pos b) dir (Bomb.power b)) [(0,-1),(0,1),(-1,0),(1,0)]
   where
     fireColumn _ _ 0 = []
-    fireColumn pos dirVec power = if isWall s nextPos
+    fireColumn pos dirVec power = if isWall state nextPos
                                   then []
-                                  else if isBlock s nextPos || isItem s nextPos
+                                  else if isBlock state nextPos || isItem state nextPos
                                        then [Pos.toVec nextPos]
                                        else Pos.toVec nextPos : fireColumn nextPos dirVec (power - 1)
       where nextPos = Pos.addVec pos dirVec
 
-isItem s pos = isJust $ find (\item -> (Item.pos item) == pos) (items s)
+isItem state pos = isJust $ find (\item -> (Item.pos item) == pos) (items state)
 
 itemsGetIncinerated :: GameState -> GameState
-itemsGetIncinerated s = s { items = [i | i <- (items s), not $ (Set.member (toVec (Item.pos i)) (fires s))] }
+itemsGetIncinerated state = state { items = [i | i <- (items state), not $ (S.member (toVec (Item.pos i)) (fires state))] }
 
 -- TODO: アイテムが落ちること。
 blocksGetIncinerated :: GameState -> GameState
-blocksGetIncinerated s = s { blocks = Set.fromList $ [b | b <- Set.toList (blocks s), not $ (Set.member b (fires s))] }
+blocksGetIncinerated state = state { blocks = S.fromList $ [b | b <- S.toList (blocks state), not $ (S.member b (fires state))] }
 
 deadPlayersGetMarked :: GameState -> GameState
-deadPlayersGetMarked s =
-  s { players = map (\p -> if isDead p
+deadPlayersGetMarked state =
+  state { players = map (\p -> if isDead p
                            then p { isAlive = False, ch = "墓" }
-                           else p) (players s) }
+                           else p) (players state) }
   where
     isDead player = let coords = toVec(Player.pos player )
-                    in Set.member coords (fires s) || Set.member coords (walls s)
+                    in S.member coords (fires state) || S.member coords (walls state)
