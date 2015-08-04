@@ -9,6 +9,7 @@ data Bomb = Bomb { pos :: Pos,
             deriving (Show, Eq, Data, Typeable)
 
 -- | 爆発までのカウントを減じる
+-- >>> import Pos
 -- >>> let bomb = Bomb Pos { x = 1, y = 1 } 10 2
 -- >>> timer $ decrementCount bomb
 -- 9
