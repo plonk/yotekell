@@ -10,14 +10,18 @@ import AI
 
 main =
   -- 標準入出力のブロックバッファリングを切る。
-  do hSetBuffering stdin LineBuffering
-     hSetBuffering stdout LineBuffering
+  do disableBuffering
      initGen <- newStdGen
    
      putStrLn "ヨテケル"
      idStr <- getLine
    
      iter (read idStr :: Int) initGen
+
+disableBuffering =
+  do hSetBuffering stdin LineBuffering
+     hSetBuffering stdout LineBuffering
+
 
 iter myID gen =
   do eof <- hIsEOF stdin

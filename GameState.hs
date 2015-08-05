@@ -52,10 +52,8 @@ spiral left right top bottom =
 -- | 螺旋状の壁振り座標系列
 -- >>> length fallingWalls
 -- 144
--- >>> head fallingWalls
--- (1,1)
--- >>> last fallingWalls
--- (4,5)
+-- >>> (head fallingWalls, last fallingWalls)
+-- ((1,1),(4,5))
 fallingWalls = spiral 1 13 1 13
 
 data GameState = GameState { turn    :: Int,
@@ -151,6 +149,7 @@ playersPutBombs moves state = applyThese state $
                                   setBombLimit player > setBombCount player
 
 -- | pos に爆弾がある。
+-- >>> import Pos
 -- >>> isBomb sampleState $ Pos 1 1
 -- False
 -- >>> let state' = playersPutBombs (take 4 $ repeat $ Move Stay True) sampleState
@@ -217,7 +216,8 @@ turnIncrements state = state { turn = (turn state) + 1 }
 --   (n - 2) * 4 + 4 + (((n-1)/2) - 1)^2
 -- 
 -- となるので、n = 15 の場合 92 になる。
--- 
+--
+-- >>> import qualified Data.Set as S
 -- >>> let state' = sampleState { turn = 360 }
 -- >>> S.size (walls state')
 -- 92
