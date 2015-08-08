@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module AI where
 
 import System.Random
@@ -5,6 +6,8 @@ import System.Timeout
 import Data.List
 import Data.Maybe
 import Debug.Trace
+import Control.Monad
+import System.Timeout.Returning
 
 import GameState
 -- Either の Left/Right との衝突を避けるため条件付きで輸入する。
@@ -39,17 +42,6 @@ legalMoves state id = [M.Move c b |
                        c <- [M.Up, M.Down, M.Left, M.Right, M.Stay],
                        b <- [True, False]]
 
--- | 手を決定する。タイムアウト付き。
-decideMove :: RandomGen g =>
-              Int -> GameState -> g -> IO (M.Move, g)
-decideMove id state gen =
-    do
-      result <- timeout (500*1000) $ decideMove' id state gen
-      case result of
-        Just (move, gen') -> return (move, gen')
-        -- 時間切れになった時のデフォルトの行動。
-        Nothing -> return (M.Move M.Stay False, gen)
-
 splitN :: RandomGen g => g -> Int -> ([g], g)
 splitN gen n = gens !! n
   where
@@ -69,21 +61,31 @@ decentMove = any (> (-100.0))
 indexOfMax xs = let maxValue = foldr1 max xs
                 in length $ takeWhile (/= maxValue) xs
 
--- | 手を決定する。時間制限は気にしない。それぞれの手について評価値の無限リストを作る。
+-- | 手を決定する。
 -- id は自分の ID。
-decideMove' :: RandomGen g =>
+decideMove :: RandomGen g =>
                Int -> GameState -> g -> IO (M.Move, g)
-decideMove' id state gen =
+decideMove id state gen =
     do
       let moves = legalMoves state id
       let (gens, gen') = splitN gen (length moves)
-      let Just scores = find decentMove
-                        $ drop 5
-                        $ transpose
-                        $ map partialAverages
-                        $ zipWith (\move g -> scoreStream id move state g) moves gens
-      let idx = indexOfMax scores
-      return (moves !! idx, gen')
+      maybeScores <- runTimeoutNF 200 $ computeScores id state moves gens
+      case maybeScores of
+        Just scores -> do let idx = indexOfMax scores
+                          return (moves !! idx, gen')
+        Nothing -> do return (M.Move M.Stay False, gen')
+      
+
+computeScores :: RandomGen g =>
+          MonadTimeout [Double] m =>
+          Int -> GameState -> [M.Move] -> [g] -> m (Maybe [Double])
+computeScores id state moves gens =
+  do
+    let scoreStreams = zipWith (\move g ->
+                                 scoreStream id move state g)
+                       moves gens
+    let iter = \(ss : sr) -> partialResult ss >> iter sr
+    iter $ transpose $ map partialAverages scoreStreams
 
 randomizedValues f gen = let (value, gen') = f gen
                          in value : randomizedValues f gen'
